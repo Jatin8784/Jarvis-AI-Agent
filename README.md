@@ -73,6 +73,22 @@ JARVIS includes three powerful earning systems:
 
 ## 🚀 Installation
 
+### Quick Install (Windows)
+
+**One-line install command:**
+```powershell
+irm https://raw.githubusercontent.com/Jatin8784/Jarvis-AI-Agent/main/install.ps1 | iex
+```
+
+Or **download manually**:
+1. Go to [Releases](https://github.com/Jatin8784/Jarvis-AI-Agent/releases/latest)
+2. Download `Jarvis-1.0.0-Windows-Portable.zip`
+3. Extract and run `Jarvis.exe`
+
+---
+
+### Build from Source
+
 ### Prerequisites
 - Node.js 16+ and npm
 - Windows OS (currently optimized for Windows)
@@ -81,8 +97,8 @@ JARVIS includes three powerful earning systems:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/jarvis-ai.git
-cd jarvis-ai/jarvis
+git clone https://github.com/Jatin8784/Jarvis-AI-Agent.git
+cd Jarvis-AI-Agent/jarvis
 
 # Install dependencies
 npm install
