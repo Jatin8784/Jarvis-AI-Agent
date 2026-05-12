@@ -2,6 +2,7 @@
   "name": "jarvis-ai",
   "version": "1.0.0",
   "description": "Jarvis - AI Desktop Agent",
+  "author": "Jatin",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -54,8 +55,26 @@
       "output": "release"
     },
     "files": [
-      "dist-electron/**/*",
-      "dist/**/*"
-    ]
+      "out/**/*"
+    ],
+    "extraMetadata": {
+      "main": "out/main/index.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-portable.${ext}",
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "electronDist": "node_modules/electron/dist",
+    "electronVersion": "28.2.0"
   }
 }
