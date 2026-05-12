@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+out/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Database
+*.db
+*.sqlite
+
+# Generated files
+portfolio/
+freelance-jobs.json
+applications.json
+freelance-profile.json
+content-library.json
+content-schedule.json
+content-stats.json
+portfolio-data.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
