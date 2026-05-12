@@ -23,6 +23,7 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
   const [attachedFiles, setAttachedFiles] = useState<File[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -110,15 +111,16 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
   const toggleVoice = async () => {
     if (isRecording) {
       // Stop recording
-      setIsRecording(false)
-      if (mediaRecorderRef.current) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop()
       }
+      setIsRecording(false)
     } else {
       // Start recording
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        
+        streamRef.current = stream
+
         const mediaRecorder = new MediaRecorder(stream)
         mediaRecorderRef.current = mediaRecorder
         audioChunksRef.current = []
@@ -131,18 +133,20 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
 
         mediaRecorder.onstop = async () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType })
-          
-          // Convert to base64
+
           const reader = new FileReader()
           reader.readAsDataURL(audioBlob)
           reader.onloadend = async () => {
             const base64Audio = (reader.result as string).split(',')[1]
-            
+
             setIsTranscribing(true)
             try {
               const result = await (window as any).jarvis.transcribe(base64Audio, mediaRecorder.mimeType)
               if (result.success && result.transcript) {
-                setValue(prev => prev ? `${prev} ${result.transcript}` : result.transcript)
+                setValue(prev => {
+                  const newText = result.transcript.trim()
+                  return prev ? `${prev} ${newText}` : newText
+                })
               } else if (result.error) {
                 console.error('Transcription error:', result.error)
               }
@@ -153,16 +157,23 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
             }
           }
 
-          // Stop all tracks
-          stream.getTracks().forEach(track => track.stop())
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+          }
         }
 
         setIsRecording(true)
         mediaRecorder.start()
-        
       } catch (err: any) {
         console.error('Microphone access error:', err)
-        alert('Could not access microphone. Please check permissions.')
+        if (err.name === 'NotAllowedError') {
+          alert('Microphone access denied. Please allow microphone access in your browser settings.')
+        } else if (err.name === 'NotFoundError') {
+          alert('No microphone found. Please connect a microphone and try again.')
+        } else {
+          alert('Could not access microphone: ' + err.message)
+        }
         setIsRecording(false)
       }
     }

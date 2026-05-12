@@ -42,6 +42,28 @@ import {
   viewPortfolio,
   generateJarvisPortfolio
 } from './portfolio-generator'
+import {
+  connectSocialAccount,
+  disconnectSocialAccount,
+  listSocialAccounts,
+  postToLinkedIn,
+  postToInstagram,
+  postToYouTube,
+  postToTwitter,
+  crossPost,
+  getPostStats,
+  schedulePost
+} from './social-media-poster'
+import {
+  createVideoProject,
+  addVideoScene,
+  generateVideoFromScript,
+  renderVideo,
+  viewVideoProject,
+  listVideoProjects,
+  generateThumbnail,
+  deleteVideoProject
+} from './video-generator'
 
 export async function dispatchTool(
   name: string,
@@ -208,6 +230,82 @@ export async function dispatchTool(
 
       case 'generate_jarvis_portfolio':
         return generateJarvisPortfolio()
+
+      // Social Media Posting Tools
+      case 'connect_social_account':
+        return connectSocialAccount(
+          args.platform,
+          args.username,
+          {
+            accessToken: args.accessToken,
+            refreshToken: args.refreshToken,
+            apiKey: args.apiKey
+          }
+        )
+
+      case 'disconnect_social_account':
+        return disconnectSocialAccount(args.platform, args.username)
+
+      case 'list_social_accounts':
+        return listSocialAccounts()
+
+      case 'post_to_linkedin':
+        return await postToLinkedIn(args.content, args.imageUrl, args.videoUrl)
+
+      case 'post_to_instagram':
+        return await postToInstagram(args.caption, args.mediaUrl, args.mediaType)
+
+      case 'post_to_youtube':
+        return await postToYouTube(
+          args.title,
+          args.description,
+          args.videoUrl,
+          args.tags,
+          args.visibility
+        )
+
+      case 'post_to_twitter':
+        return await postToTwitter(args.content, args.mediaUrl)
+
+      case 'cross_post':
+        return await crossPost(args.content, args.platforms, args.mediaUrl)
+
+      case 'get_post_stats':
+        return getPostStats(args.platform)
+
+      case 'schedule_post':
+        return schedulePost(args.platform, args.content, args.scheduledFor, args.mediaUrl)
+
+      // Video Generation Tools
+      case 'create_video_project':
+        return createVideoProject(args.title, args.description, args.format, args.duration)
+
+      case 'add_video_scene':
+        return addVideoScene(
+          args.projectId,
+          args.sceneType,
+          args.content,
+          args.duration,
+          args.style
+        )
+
+      case 'generate_video_from_script':
+        return await generateVideoFromScript(args.script, args.format, args.style)
+
+      case 'render_video':
+        return await renderVideo(args.projectId)
+
+      case 'view_video_project':
+        return viewVideoProject(args.projectId)
+
+      case 'list_video_projects':
+        return listVideoProjects()
+
+      case 'generate_thumbnail':
+        return generateThumbnail(args.projectId, args.text, args.style)
+
+      case 'delete_video_project':
+        return deleteVideoProject(args.projectId)
 
       default:
         return `Unknown tool: ${name}`

@@ -782,5 +782,377 @@ export const geminiTools: FunctionDeclaration[] = [
       type: SchemaType.OBJECT,
       properties: {}
     }
+  },
+  {
+    name: 'connect_social_account',
+    description: 'Connect a social media account (LinkedIn, Instagram, YouTube, Twitter) for auto-posting.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        platform: {
+          type: SchemaType.STRING,
+          description: 'Platform name: linkedin, instagram, youtube, twitter, facebook, tiktok'
+        },
+        username: {
+          type: SchemaType.STRING,
+          description: 'Your username on the platform'
+        },
+        accessToken: {
+          type: SchemaType.STRING,
+          description: 'API access token (optional for now)'
+        },
+        refreshToken: {
+          type: SchemaType.STRING,
+          description: 'API refresh token (optional)'
+        },
+        apiKey: {
+          type: SchemaType.STRING,
+          description: 'API key (optional)'
+        }
+      },
+      required: ['platform', 'username']
+    }
+  },
+  {
+    name: 'disconnect_social_account',
+    description: 'Disconnect a social media account.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        platform: {
+          type: SchemaType.STRING,
+          description: 'Platform name'
+        },
+        username: {
+          type: SchemaType.STRING,
+          description: 'Username'
+        }
+      },
+      required: ['platform', 'username']
+    }
+  },
+  {
+    name: 'list_social_accounts',
+    description: 'List all connected social media accounts.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {}
+    }
+  },
+  {
+    name: 'post_to_linkedin',
+    description: 'Post content to LinkedIn with optional image or video.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        content: {
+          type: SchemaType.STRING,
+          description: 'Post content/text'
+        },
+        imageUrl: {
+          type: SchemaType.STRING,
+          description: 'Image URL (optional)'
+        },
+        videoUrl: {
+          type: SchemaType.STRING,
+          description: 'Video URL (optional)'
+        }
+      },
+      required: ['content']
+    }
+  },
+  {
+    name: 'post_to_instagram',
+    description: 'Post image, video, or reel to Instagram.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        caption: {
+          type: SchemaType.STRING,
+          description: 'Post caption'
+        },
+        mediaUrl: {
+          type: SchemaType.STRING,
+          description: 'Image or video URL'
+        },
+        mediaType: {
+          type: SchemaType.STRING,
+          description: 'Media type: image, video, or reel',
+          enum: ['image', 'video', 'reel']
+        }
+      },
+      required: ['caption', 'mediaUrl']
+    }
+  },
+  {
+    name: 'post_to_youtube',
+    description: 'Upload video to YouTube.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        title: {
+          type: SchemaType.STRING,
+          description: 'Video title'
+        },
+        description: {
+          type: SchemaType.STRING,
+          description: 'Video description'
+        },
+        videoUrl: {
+          type: SchemaType.STRING,
+          description: 'Video file URL or path'
+        },
+        tags: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.STRING
+          },
+          description: 'Video tags'
+        },
+        visibility: {
+          type: SchemaType.STRING,
+          description: 'Visibility: public, unlisted, or private',
+          enum: ['public', 'unlisted', 'private']
+        }
+      },
+      required: ['title', 'description', 'videoUrl', 'tags']
+    }
+  },
+  {
+    name: 'post_to_twitter',
+    description: 'Post tweet to Twitter with optional media.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        content: {
+          type: SchemaType.STRING,
+          description: 'Tweet content (max 280 characters)'
+        },
+        mediaUrl: {
+          type: SchemaType.STRING,
+          description: 'Media URL (optional)'
+        }
+      },
+      required: ['content']
+    }
+  },
+  {
+    name: 'cross_post',
+    description: 'Post content to multiple social media platforms at once.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        content: {
+          type: SchemaType.STRING,
+          description: 'Content to post'
+        },
+        platforms: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.STRING
+          },
+          description: 'Array of platforms: linkedin, instagram, twitter, facebook'
+        },
+        mediaUrl: {
+          type: SchemaType.STRING,
+          description: 'Media URL (optional)'
+        }
+      },
+      required: ['content', 'platforms']
+    }
+  },
+  {
+    name: 'get_post_stats',
+    description: 'Get statistics for social media posts (views, likes, comments, shares).',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        platform: {
+          type: SchemaType.STRING,
+          description: 'Filter by platform (optional)'
+        }
+      }
+    }
+  },
+  {
+    name: 'schedule_post',
+    description: 'Schedule a post for later.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        platform: {
+          type: SchemaType.STRING,
+          description: 'Platform name'
+        },
+        content: {
+          type: SchemaType.STRING,
+          description: 'Post content'
+        },
+        scheduledFor: {
+          type: SchemaType.STRING,
+          description: 'Date/time to post (ISO format)'
+        },
+        mediaUrl: {
+          type: SchemaType.STRING,
+          description: 'Media URL (optional)'
+        }
+      },
+      required: ['platform', 'content', 'scheduledFor']
+    }
+  },
+  {
+    name: 'create_video_project',
+    description: 'Create a new video project for YouTube, Instagram Reel, TikTok, or YouTube Short.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        title: {
+          type: SchemaType.STRING,
+          description: 'Video title'
+        },
+        description: {
+          type: SchemaType.STRING,
+          description: 'Video description'
+        },
+        format: {
+          type: SchemaType.STRING,
+          description: 'Video format',
+          enum: ['youtube', 'instagram-reel', 'tiktok', 'youtube-short', 'linkedin']
+        },
+        duration: {
+          type: SchemaType.NUMBER,
+          description: 'Target duration in seconds (default: 60)'
+        }
+      },
+      required: ['title', 'description', 'format']
+    }
+  },
+  {
+    name: 'add_video_scene',
+    description: 'Add a scene to a video project (text, image, or video clip).',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        projectId: {
+          type: SchemaType.STRING,
+          description: 'Video project ID'
+        },
+        sceneType: {
+          type: SchemaType.STRING,
+          description: 'Scene type',
+          enum: ['image', 'text', 'video']
+        },
+        content: {
+          type: SchemaType.STRING,
+          description: 'Scene content (text or URL)'
+        },
+        duration: {
+          type: SchemaType.NUMBER,
+          description: 'Scene duration in seconds'
+        },
+        style: {
+          type: SchemaType.OBJECT,
+          description: 'Style options (optional)'
+        }
+      },
+      required: ['projectId', 'sceneType', 'content', 'duration']
+    }
+  },
+  {
+    name: 'generate_video_from_script',
+    description: 'Automatically generate a video project from a script.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        script: {
+          type: SchemaType.STRING,
+          description: 'Video script text'
+        },
+        format: {
+          type: SchemaType.STRING,
+          description: 'Video format',
+          enum: ['youtube', 'instagram-reel', 'tiktok', 'youtube-short']
+        },
+        style: {
+          type: SchemaType.STRING,
+          description: 'Visual style',
+          enum: ['minimal', 'dynamic', 'professional', 'fun']
+        }
+      },
+      required: ['script']
+    }
+  },
+  {
+    name: 'render_video',
+    description: 'Render a video project to create the final video file.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        projectId: {
+          type: SchemaType.STRING,
+          description: 'Video project ID'
+        }
+      },
+      required: ['projectId']
+    }
+  },
+  {
+    name: 'view_video_project',
+    description: 'View details of a video project.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        projectId: {
+          type: SchemaType.STRING,
+          description: 'Video project ID'
+        }
+      },
+      required: ['projectId']
+    }
+  },
+  {
+    name: 'list_video_projects',
+    description: 'List all video projects.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {}
+    }
+  },
+  {
+    name: 'generate_thumbnail',
+    description: 'Generate thumbnail design suggestions for a video.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        projectId: {
+          type: SchemaType.STRING,
+          description: 'Video project ID'
+        },
+        text: {
+          type: SchemaType.STRING,
+          description: 'Thumbnail text'
+        },
+        style: {
+          type: SchemaType.STRING,
+          description: 'Thumbnail style',
+          enum: ['youtube', 'instagram', 'tiktok']
+        }
+      },
+      required: ['projectId', 'text']
+    }
+  },
+  {
+    name: 'delete_video_project',
+    description: 'Delete a video project.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        projectId: {
+          type: SchemaType.STRING,
+          description: 'Video project ID'
+        }
+      },
+      required: ['projectId']
+    }
   }
 ]
