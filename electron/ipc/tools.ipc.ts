@@ -2,6 +2,8 @@ import { ipcMain } from 'electron'
 import store from '../../agent/store'
 import os from 'os'
 import { dispatchTool } from '../../agent/tools/dispatcher'
+import { getFileChangeHistory, revertFileChange } from '../../agent/tools/file-system'
+import { sendEmailOTP, verifyEmailOTP } from '../services/email-otp'
 
 export function registerToolsIPC() {
   // Tool execution handler for frontend Puter.js
@@ -16,6 +18,16 @@ export function registerToolsIPC() {
     }
   })
 
+  // --- File Revert IPC ---
+  ipcMain.handle('file:getChangeHistory', () => {
+    return getFileChangeHistory()
+  })
+
+  ipcMain.handle('file:revert', (_, changeId: string) => {
+    const result = revertFileChange(changeId)
+    return { result }
+  })
+
   ipcMain.handle('settings:get', () => {
     return {
       provider: store.get('provider', 'groq'),
@@ -23,6 +35,10 @@ export function registerToolsIPC() {
       groqKey: store.get('groqKey', process.env.GROQ_API_KEY || ''),
       claudeKey: store.get('claudeKey', process.env.CLAUDE_API_KEY || ''),
       deepseekKey: store.get('deepseekKey', process.env.DEEPSEEK_API_KEY || ''),
+      minimaxKey: store.get('minimaxKey', process.env.MINIMAX_API_KEY || ''),
+      ollamaKey: store.get('ollamaKey', process.env.OLLAMA_API_KEY || ''),
+      ollamaBaseUrl: store.get('ollamaBaseUrl', process.env.OLLAMA_BASE_URL || 'https://ollama.com/v1'),
+      puterToken: store.get('puterToken', ''),
       model: store.get('model', 'llama-3.3-70b-versatile'),
       voice: store.get('voice', true),
       theme: store.get('theme', 'jarvis'),
@@ -64,5 +80,16 @@ export function registerToolsIPC() {
 
   ipcMain.handle('voice:stop', async () => {
     return { transcript: '' }
+  })
+
+  // --- Email OTP ---
+  ipcMain.handle('otp:send-email', async (_, email: string) => {
+    console.log('📧 OTP request received for:', email)
+    return await sendEmailOTP(email)
+  })
+
+  ipcMain.handle('otp:verify-email', async (_, { email, code }: { email: string; code: string }) => {
+    console.log('🔑 OTP verify request for:', email)
+    return verifyEmailOTP(email, code)
   })
 }

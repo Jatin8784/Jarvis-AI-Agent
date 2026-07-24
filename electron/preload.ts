@@ -24,12 +24,14 @@ contextBridge.exposeInMainWorld('jarvis', {
   },
 
   // History
-  getHistory:   (limit?: number) => ipcRenderer.invoke('db:history', limit),
+  getHistory:   (limit?: number, userId?: string) => ipcRenderer.invoke('db:history', limit, userId),
   clearHistory: () => ipcRenderer.invoke('db:clear'),
-  createSession: (id: string, title: string) => ipcRenderer.invoke('db:session-create', { id, title }),
+  createSession: (id: string, title: string, userId?: string) => ipcRenderer.invoke('db:session-create', { id, title, userId }),
   updateSession: (id: string, title: string) => ipcRenderer.invoke('db:session-update', { id, title }),
+  deleteSession: (sessionId: string) => ipcRenderer.invoke('db:session-delete', sessionId),
   getSession:   (id: string) => ipcRenderer.invoke('db:session', id),
-  getSessions:  () => ipcRenderer.invoke('db:sessions'),
+  getSessions:  (userId?: string) => ipcRenderer.invoke('db:sessions', userId),
+  saveAttachments: (data: any) => ipcRenderer.invoke('db:save-attachments', data),
 
   // Voice
   startRecording: () => ipcRenderer.invoke('voice:start'),
@@ -41,8 +43,16 @@ contextBridge.exposeInMainWorld('jarvis', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (s: any) => ipcRenderer.invoke('settings:set', s),
 
+  // File Revert
+  getFileChangeHistory: () => ipcRenderer.invoke('file:getChangeHistory'),
+  revertFileChange: (changeId: string) => ipcRenderer.invoke('file:revert', changeId),
+
   // System
   getSystemInfo: () => ipcRenderer.invoke('system:info'),
+
+  // Email OTP
+  sendEmailOTP: (email: string) => ipcRenderer.invoke('otp:send-email', email),
+  verifyEmailOTP: (email: string, code: string) => ipcRenderer.invoke('otp:verify-email', { email, code }),
 
   // Tools (for Puter.js frontend execution)
   executeTool: (toolName: string, args: any) => 

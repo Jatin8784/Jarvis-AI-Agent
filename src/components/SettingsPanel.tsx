@@ -12,6 +12,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     groqKey: '',
     claudeKey: '',
     deepseekKey: '',
+    minimaxKey: '',
+    ollamaKey: '',
+    ollamaBaseUrl: 'https://ollama.com/v1',
+    puterToken: '',
     model: 'llama-3.3-70b-versatile',
     voice: true,
     runOnStartup: true,
@@ -24,6 +28,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     groq: false,
     claude: false,
     deepseek: false,
+    minimax: false,
+    ollama: false,
+    puter: false,
   })
 
   useEffect(() => {
@@ -41,7 +48,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       deepseek: 'deepseek-chat',
       gemini: 'gemini-2.5-flash',
       groq: 'llama-3.3-70b-versatile',
-      claude: 'claude-3-5-sonnet-20241022'
+      claude: 'claude-3-5-sonnet-20241022',
+      minimax: 'MiniMax-M3',
+      ollama: 'deepseek-v4-pro'
     }
     
     setSettings(s => ({
@@ -64,8 +73,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center"
          style={{ background: 'rgba(5, 8, 16, 0.85)' }}
          onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="w-full max-w-lg rounded border border-jarvis-border bg-jarvis-panel p-6"
+      <div className="w-full max-w-lg max-h-[90vh] rounded border border-jarvis-border bg-jarvis-panel flex flex-col"
            style={{ boxShadow: '0 0 40px rgba(0,212,255,0.1)' }}>
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
         <div className="flex items-center justify-between mb-6">
           <h2 className="font-display text-jarvis-accent tracking-widest text-sm">SETTINGS</h2>
@@ -87,6 +97,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               <option value="claude">Claude (Best Quality - $5 free)</option>
               <option value="groq">Groq (Unstable)</option>
               <option value="gemini">Google Gemini</option>
+              <option value="minimax">MiniMax (M3, M2, Text-01)</option>
+              <option value="ollama">Ollama Cloud (DeepSeek V4 Pro & more)</option>
             </select>
           </div>
 
@@ -98,14 +110,48 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   Puter.js uses the "User-Pays" model - users authenticate with their Puter account and cover their own AI costs.
                 </p>
                 <p className="text-jarvis-muted text-xs mb-2">
-                  • No API key needed<br/>
                   • Unlimited usage<br/>
-                  • Access to GPT-5.4, Claude, Gemini & more<br/>
-                  • Users sign in once with Puter account
+                  • Access to GPT-4o, Claude, Gemini & more<br/>
+                  • Create a token at puter.com → Account → API Token
                 </p>
-                <p className="text-jarvis-muted text-xs">
-                  First time users will be prompted to sign in at{' '}
-                  <span className="text-jarvis-accent">puter.com</span>
+              </div>
+
+              <div>
+                <label className="block text-jarvis-muted text-xs font-display tracking-wider mb-1.5">
+                  PUTER API TOKEN
+                </label>
+                <div className="relative">
+                  <input
+                    type={showKeys.puter ? "text" : "password"}
+                    value={settings.puterToken || ''}
+                    onChange={e => setSettings(s => ({ ...s, puterToken: e.target.value }))}
+                    placeholder="Paste your Puter API token here"
+                    className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 pr-10 text-jarvis-text text-sm
+                               outline-none focus:border-jarvis-accent/50 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeys(s => ({ ...s, puter: !s.puter }))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-jarvis-muted hover:text-jarvis-accent transition-colors p-1"
+                    title={showKeys.puter ? "Hide" : "Show"}
+                  >
+                    {showKeys.puter ? (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.5"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                        <line x1="2" y1="2" x2="14" y2="14" stroke="currentColor" strokeWidth="1.5"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.5"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <p className="text-jarvis-muted text-xs mt-1">
+                  Get it from{' '}
+                  <span className="text-jarvis-accent">puter.com → Account → Create token</span>
                 </p>
               </div>
 
@@ -116,10 +162,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   onChange={e => setSettings(s => ({ ...s, model: e.target.value }))}
                   className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 text-jarvis-text text-sm outline-none"
                 >
-                  <option value="gpt-5.4">GPT-5.4 (recommended)</option>
-                  <option value="gpt-5.3-chat">GPT-5.3 Chat</option>
-                  <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="gpt-4o">GPT-4o (vision)</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini (fast)</option>
+                  <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (vision)</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (fast, text only)</option>
                 </select>
               </div>
             </>
@@ -297,6 +343,139 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 </select>
               </div>
             </>
+          ) : settings.provider === 'minimax' ? (
+            <>
+              <div>
+                <label className="block text-jarvis-muted text-xs font-display tracking-wider mb-1.5">
+                  MINIMAX API KEY
+                </label>
+                <div className="relative">
+                  <input
+                    type={showKeys.minimax ? "text" : "password"}
+                    value={settings.minimaxKey}
+                    onChange={e => setSettings(s => ({ ...s, minimaxKey: e.target.value }))}
+                    placeholder="eyJ..."
+                    className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 pr-10 text-jarvis-text text-sm
+                               outline-none focus:border-jarvis-accent/50 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeys(s => ({ ...s, minimax: !s.minimax }))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-jarvis-muted hover:text-jarvis-accent transition-colors p-1"
+                    title={showKeys.minimax ? "Hide" : "Show"}
+                  >
+                    {showKeys.minimax ? (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.5"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                        <line x1="2" y1="2" x2="14" y2="14" stroke="currentColor" strokeWidth="1.5"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.5"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <p className="text-jarvis-muted text-xs mt-1">
+                  Get key at{' '}
+                  <span className="text-jarvis-accent">platform.minimax.io</span>
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-jarvis-muted text-xs font-display tracking-wider mb-1.5">MODEL</label>
+                <select
+                  value={settings.model}
+                  onChange={e => setSettings(s => ({ ...s, model: e.target.value }))}
+                  className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 text-jarvis-text text-sm outline-none"
+                >
+                  <optgroup label="M-Series (Latest)">
+                    <option value="MiniMax-M3">MiniMax-M3 (recommended — coding & agents)</option>
+                    <option value="MiniMax-M2.7">MiniMax-M2.7</option>
+                    <option value="MiniMax-M2">MiniMax-M2</option>
+                  </optgroup>
+                  <optgroup label="Text Series (Legacy)">
+                    <option value="MiniMax-Text-01">MiniMax-Text-01 (456B, long-context)</option>
+                  </optgroup>
+                </select>
+              </div>
+            </>
+          ) : settings.provider === 'ollama' ? (
+            <>
+              <div>
+                <label className="block text-jarvis-muted text-xs font-display tracking-wider mb-1.5">
+                  OLLAMA API KEY
+                </label>
+                <div className="relative">
+                  <input
+                    type={showKeys.ollama ? "text" : "password"}
+                    value={settings.ollamaKey}
+                    onChange={e => setSettings(s => ({ ...s, ollamaKey: e.target.value }))}
+                    placeholder="Your Ollama Cloud API key"
+                    className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 pr-10 text-jarvis-text text-sm
+                               outline-none focus:border-jarvis-accent/50 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeys(s => ({ ...s, ollama: !s.ollama }))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-jarvis-muted hover:text-jarvis-accent transition-colors p-1"
+                    title={showKeys.ollama ? "Hide" : "Show"}
+                  >
+                    {showKeys.ollama ? (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.5"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                        <line x1="2" y1="2" x2="14" y2="14" stroke="currentColor" strokeWidth="1.5"/>
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 8s2-4 6-4 6 4 6 4-2 4-6 4-6-4-6-4z" stroke="currentColor" strokeWidth="1.5"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <p className="text-jarvis-muted text-xs mt-1">
+                  Get key at{' '}
+                  <span className="text-jarvis-accent">ollama.com</span>
+                  {' '}(Cloud / Turbo)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-jarvis-muted text-xs font-display tracking-wider mb-1.5">
+                  BASE URL
+                </label>
+                <input
+                  type="text"
+                  value={settings.ollamaBaseUrl}
+                  onChange={e => setSettings(s => ({ ...s, ollamaBaseUrl: e.target.value }))}
+                  placeholder="https://ollama.com/v1"
+                  className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 text-jarvis-text text-sm
+                             outline-none focus:border-jarvis-accent/50 font-mono"
+                />
+                <p className="text-jarvis-muted text-xs mt-1">
+                  Point at a local Ollama (<span className="text-jarvis-accent">http://localhost:11434/v1</span>) or the hosted cloud endpoint.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-jarvis-muted text-xs font-display tracking-wider mb-1.5">MODEL</label>
+                <input
+                  type="text"
+                  value={settings.model}
+                  onChange={e => setSettings(s => ({ ...s, model: e.target.value }))}
+                  placeholder="deepseek-v4-pro"
+                  className="w-full bg-jarvis-bg border border-jarvis-border rounded px-3 py-2 text-jarvis-text text-sm
+                             outline-none focus:border-jarvis-accent/50 font-mono"
+                />
+                <p className="text-jarvis-muted text-xs mt-1">
+                  Any Ollama model tag, e.g. <span className="text-jarvis-accent">deepseek-v4-pro</span>, <span className="text-jarvis-accent">gpt-oss:120b-cloud</span>, <span className="text-jarvis-accent">qwen3-coder:480b-cloud</span>.
+                </p>
+              </div>
+            </>
           ) : (
             <>
               <div>
@@ -408,8 +587,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             </button>
           </div>
         </div>
+        </div>
 
-        <div className="flex gap-3 mt-6">
+        <div className="flex gap-3 px-6 py-4 border-t border-jarvis-border flex-shrink-0">
           <button onClick={onClose}
             className="flex-1 py-2 rounded border border-jarvis-border text-jarvis-muted text-sm hover:text-jarvis-text transition-colors font-display tracking-wider">
             CANCEL

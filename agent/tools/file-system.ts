@@ -1,7 +1,77 @@
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync, unlinkSync, rmSync } from 'fs'
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync, unlinkSync, rmSync, copyFileSync } from 'fs'
 import { join, dirname, resolve, extname, basename } from 'path'
 import { homedir } from 'os'
 import mammoth from 'mammoth'
+
+// --- File Change Tracking (for Revert) ---
+export interface FileChange {
+  id: string
+  filePath: string
+  timestamp: number
+  type: 'create' | 'modify'
+  // Base64-encoded previous content (null if file was newly created)
+  previousContent: string | null
+  // Brief description of the change
+  description: string
+}
+
+// Keep last 50 file changes in memory for revert
+const fileChangeHistory: FileChange[] = []
+const MAX_HISTORY = 50
+
+function trackFileChange(filePath: string, type: 'create' | 'modify', previousContent: string | null, description: string) {
+  const change: FileChange = {
+    id: `change_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    filePath,
+    timestamp: Date.now(),
+    type,
+    previousContent,
+    description,
+  }
+  fileChangeHistory.unshift(change)
+  if (fileChangeHistory.length > MAX_HISTORY) {
+    fileChangeHistory.pop()
+  }
+  console.log(`📝 Tracked file change: ${type} ${filePath}`)
+}
+
+export function getFileChangeHistory(): FileChange[] {
+  return [...fileChangeHistory]
+}
+
+export function revertFileChange(changeId: string): string {
+  const idx = fileChangeHistory.findIndex(c => c.id === changeId)
+  if (idx === -1) {
+    return '❌ Change not found. It may have expired from history.'
+  }
+
+  const change = fileChangeHistory[idx]
+
+  try {
+    if (change.type === 'create') {
+      // File was newly created — delete it to revert
+      if (existsSync(change.filePath)) {
+        unlinkSync(change.filePath)
+        fileChangeHistory.splice(idx, 1)
+        return `✅ Reverted: deleted newly created file "${basename(change.filePath)}"`
+      } else {
+        fileChangeHistory.splice(idx, 1)
+        return `⚠️ File already doesn't exist: "${change.filePath}"`
+      }
+    } else {
+      // File was modified — restore previous content
+      if (change.previousContent === null) {
+        fileChangeHistory.splice(idx, 1)
+        return '❌ No previous content stored for this change.'
+      }
+      writeFileSync(change.filePath, change.previousContent, 'utf8')
+      fileChangeHistory.splice(idx, 1)
+      return `✅ Reverted: restored "${basename(change.filePath)}" to its previous state`
+    }
+  } catch (err: any) {
+    return `❌ Failed to revert: ${err.message}`
+  }
+}
 
 // Common user directories to search
 function getSearchPaths(filename: string): string[] {
@@ -114,14 +184,28 @@ I searched in these common locations:
       }
     }
     
-    // Handle text files
-    if (['.txt', '.md', '.json', '.csv', '.xml', '.html', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.log', '.yml', '.yaml', '.ini', '.conf'].includes(ext)) {
-      const content = readFileSync(resolved, 'utf8')
-      const lines = content.split('\n').length
-      return `File: ${resolved}\nType: Text file (${ext})\nLines: ${lines}\n\n${content}`
+    // Handle text files — try to read ANY file as text unless we know it's binary
+    const binaryExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ico',
+      '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.flac', '.ogg',
+      '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2',
+      '.exe', '.dll', '.so', '.dylib', '.bin', '.dat',
+      '.doc', '.xls', '.ppt', '.psd', '.ai', '.sketch']
+    
+    if (!binaryExtensions.includes(ext)) {
+      try {
+        const content = readFileSync(resolved, 'utf8')
+        // Quick binary check: if >1% null bytes, it's probably binary
+        const nullCount = (content.match(/\0/g) || []).length
+        if (nullCount < content.length * 0.01) {
+          const lines = content.split('\n').length
+          return `File: ${resolved}\nType: Text file (${ext || 'no extension'})\nLines: ${lines}\n\n${content}`
+        }
+      } catch {
+        // Fall through to binary handling
+      }
     }
     
-    // Handle PDF (basic info only - full PDF reading requires more complex library)
+    // Handle PDF
     if (ext === '.pdf') {
       const stats = statSync(resolved)
       return `File: ${resolved}\nType: PDF Document\nSize: ${formatBytes(stats.size)}\n\nNote: PDF text extraction is not yet supported. The file exists and is ${formatBytes(stats.size)} in size.`
@@ -135,7 +219,7 @@ I searched in these common locations:
     
     // For other binary files
     const stats = statSync(resolved)
-    return `File: ${resolved}\nType: Binary file (${ext})\nSize: ${formatBytes(stats.size)}\n\nThis appears to be a binary file. Only text files and .docx documents can be read directly.`
+    return `File: ${resolved}\nType: Binary file (${ext})\nSize: ${formatBytes(stats.size)}\n\nThis appears to be a binary file. Only text-based files can be read directly.`
     
   } catch (err: any) {
     return `Error reading file: ${err.message}`
@@ -152,7 +236,6 @@ export function writeFile(filePath: string, content: string): string {
     } else {
       // For relative paths or just filenames, prioritize OneDrive Documents
       const home = homedir()
-      const username = basename(home)
       
       // Priority locations for creating new files
       const defaultLocations = [
@@ -172,21 +255,42 @@ export function writeFile(filePath: string, content: string): string {
       resolved = join(targetDir, filePath)
     }
     
+    // Track for revert BEFORE writing
+    const fileExisted = existsSync(resolved)
+    let previousContent: string | null = null
+    if (fileExisted) {
+      try {
+        previousContent = readFileSync(resolved, 'utf8')
+      } catch {
+        // Binary file or unreadable — can't revert text, but still track
+        previousContent = null
+      }
+    }
+
     const dir = dirname(resolved)
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true })
     }
     writeFileSync(resolved, content, 'utf8')
     
+    // Track the change
+    trackFileChange(
+      resolved,
+      fileExisted ? 'modify' : 'create',
+      previousContent,
+      `${fileExisted ? 'Modified' : 'Created'} ${basename(resolved)}`
+    )
+    
     const lines = content.split('\n').length
-    return `✅ **File Created Successfully**
+    return `✅ **File ${fileExisted ? 'Updated' : 'Created'} Successfully**
 
 📄 **File:** ${basename(resolved)}
 📁 **Path:** ${resolved}
 💾 **Size:** ${content.length} bytes
 📊 **Lines:** ${lines}
+🔄 **Revert available:** Yes
 
-The file has been created in your Documents folder.`
+The file has been ${fileExisted ? 'updated' : 'created'}.`
   } catch (err: any) {
     return `Error writing file: ${err.message}`
   }
@@ -242,11 +346,19 @@ export async function editFile(filePath: string, instructions: string): Promise<
       return `❌ Cannot edit Word documents (.docx) directly. Please convert to .txt first or specify what changes you need.`
     }
     
-    // Read text files
-    if (['.txt', '.md', '.json', '.csv', '.xml', '.html', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.log', '.yml', '.yaml', '.ini', '.conf'].includes(ext)) {
+    // Read text files — try any file
+    const binaryExts = ['.docx', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
+      '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.zip', '.rar', '.7z',
+      '.exe', '.dll', '.so', '.bin', '.dat', '.doc', '.xls', '.ppt', '.psd']
+    
+    if (binaryExts.includes(ext)) {
+      return `❌ Cannot edit binary files (${ext}). Only text files can be edited.`
+    }
+
+    try {
       currentContent = readFileSync(resolved, 'utf8')
-    } else {
-      return `❌ Cannot edit binary files. Only text files can be edited.`
+    } catch {
+      return `❌ Cannot read file for editing. It may be a binary file.`
     }
     
     // Return current content and instructions for the AI to process
@@ -439,9 +551,13 @@ export async function appendText(filePath: string, textToAdd: string, options?: 
 
     const ext = extname(resolved).toLowerCase()
     
-    // Only support text files
-    if (!['.txt', '.md', '.json', '.csv', '.xml', '.html', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.log', '.yml', '.yaml', '.ini', '.conf'].includes(ext)) {
-      return `❌ Cannot add text to this file type. Only text files are supported.`
+    // Only reject known binary file types
+    const binaryExts = ['.docx', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
+      '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.zip', '.rar', '.7z',
+      '.exe', '.dll', '.so', '.bin', '.dat', '.doc', '.xls', '.ppt', '.psd']
+    
+    if (binaryExts.includes(ext)) {
+      return `❌ Cannot add text to binary file type (${ext}). Only text files are supported.`
     }
     
     // Read current content

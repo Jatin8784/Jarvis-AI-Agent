@@ -2,6 +2,12 @@ import React, { useEffect, useRef, useLayoutEffect, useState } from 'react'
 import { useChatStore } from '../stores/chat.store'
 import { MessageBubble } from './MessageBubble'
 
+interface ChatWindowProps {
+  onRegenerate?: (assistantMsgId: string) => void
+  onEditAndResend?: (userMsgId: string, newText: string) => void
+  onImageClick?: (src: string, name: string) => void
+}
+
 const WELCOME_LINES = [
   '> JARVIS AI initialized.',
   '> All systems online.',
@@ -9,7 +15,7 @@ const WELCOME_LINES = [
   '> How can I assist you today?',
 ]
 
-export function ChatWindow() {
+export function ChatWindow({ onRegenerate, onEditAndResend, onImageClick }: ChatWindowProps) {
   const getCurrentMessages = useChatStore(s => s.getCurrentMessages)
   const messages = getCurrentMessages()
   const isLoading = useChatStore(s => s.isLoading)
@@ -138,7 +144,21 @@ export function ChatWindow() {
       )}
 
       {messages.map(msg => (
-        <MessageBubble key={msg.id} message={msg} />
+        <MessageBubble
+          key={msg.id}
+          message={msg}
+          onRegenerate={
+            msg.role === 'assistant' && !msg.isStreaming && onRegenerate
+              ? () => onRegenerate(msg.id)
+              : undefined
+          }
+          onEditAndResend={
+            msg.role === 'user' && onEditAndResend
+              ? (newText: string) => onEditAndResend(msg.id, newText)
+              : undefined
+          }
+          onImageClick={onImageClick}
+        />
       ))}
 
       {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
@@ -147,13 +167,9 @@ export function ChatWindow() {
                style={{ background: 'rgba(0,212,255,0.06)' }}>
             <div className="w-2 h-2 rounded-full bg-jarvis-accent animate-pulse" />
           </div>
-          <div className="flex items-center gap-1.5 mt-2.5">
-            {[0, 1, 2].map(i => (
-              <span key={i}
-                className="w-1.5 h-1.5 rounded-full bg-jarvis-accent/60"
-                style={{ animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite` }}
-              />
-            ))}
+          <div className="flex items-center gap-2.5 mt-2 py-2 px-3 rounded-lg bg-jarvis-panel/60 border border-jarvis-border">
+            <div className="w-3.5 h-3.5 border-2 border-jarvis-accent border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-jarvis-text">Thinking…</span>
           </div>
         </div>
       )}

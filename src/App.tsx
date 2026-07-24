@@ -6,10 +6,49 @@ import { Sidebar } from './components/Sidebar'
 import { StatusBar } from './components/StatusBar'
 import { SettingsPanel } from './components/SettingsPanel'
 import { WakeWordListener } from './components/WakeWordListener'
+import { RevertBar } from './components/RevertBar'
+import { ImagePreview } from './components/ImagePreview'
+import { AuthScreen } from './components/AuthScreen'
 import { useChatStore } from './stores/chat.store'
+import { useAuthStore } from './stores/auth.store'
+import { onAuthChange } from './services/firebase'
 import { callPuterAI, buildSystemPrompt } from './services/puter.service'
 
 export default function App() {
+  const { user, loading: authLoading, setUser } = useAuthStore()
+
+  // Listen to Firebase auth state
+  useEffect(() => {
+    const unsubscribe = onAuthChange((firebaseUser) => {
+      setUser(firebaseUser)
+      // Set global user ID for chat store to use
+      ;(window as any).__jarvisUserId = firebaseUser?.uid || ''
+    })
+    return () => unsubscribe()
+  }, [setUser])
+
+  // Show loading while checking auth state
+  if (authLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-jarvis-bg">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-jarvis-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-jarvis-muted text-xs font-display tracking-wider">INITIALIZING...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show auth screen if not logged in
+  if (!user) {
+    return <AuthScreen />
+  }
+
+  return <MainApp />
+}
+
+function MainApp() {
+  const { user } = useAuthStore()
   const {
     isLoading,
     activeTool,
@@ -25,6 +64,7 @@ export default function App() {
     createNewSession,
     getCurrentMessages,
     getHistory,
+    deleteMessagesFrom,
     initialize,
   } = useChatStore()
 
@@ -32,6 +72,8 @@ export default function App() {
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [currentAssistantId, setCurrentAssistantId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState('')
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
 
   useEffect(() => {
     initialize()
@@ -69,9 +111,7 @@ export default function App() {
     }
   }, [currentAssistantId, appendChunk, setActiveTool])
 
-  const sendMessage = useCallback(async (text: string) => {
-    if (isLoading) return
-
+  const processMessage = useCallback(async (text: string, meta?: { displayContent?: string; imageDataUrls?: Array<{ name: string; dataUrl: string }>; fileAttachments?: Array<{ name: string; path: string; text?: string }> }) => {
     // Reset stop flag
     setShouldStop(false)
 
@@ -120,7 +160,27 @@ export default function App() {
     }
 
     const sessionId = useChatStore.getState().currentSessionId
-    addMessage({ role: 'user', content: text })
+    console.log('[App] processMessage — meta:', { hasImages: !!meta?.imageDataUrls?.length, hasFiles: !!meta?.fileAttachments?.length, hasDisplay: !!meta?.displayContent })
+    addMessage({
+      role: 'user',
+      content: text,
+      displayContent: meta?.displayContent,
+      imageDataUrls: meta?.imageDataUrls,
+      fileAttachments: meta?.fileAttachments,
+    })
+
+    // Persist attachments and displayContent to disk/DB so they survive restart
+    // Delay to ensure backend orchestrator has saved the message first
+    const currentSessionId = useChatStore.getState().currentSessionId
+    setTimeout(() => {
+      ;(window as any).jarvis?.saveAttachments?.({
+        sessionId: currentSessionId,
+        imageDataUrls: meta?.imageDataUrls,
+        fileAttachments: meta?.fileAttachments,
+        displayContent: meta?.displayContent,
+        content: text, // pass content so it can save if backend hasn't yet (Puter case)
+      })
+    }, 3000)
 
     const assistantId = addMessage({
       role: 'assistant',
@@ -145,7 +205,7 @@ export default function App() {
         const systemPrompt = buildSystemPrompt(settings?.systemPrompt || '')
         const model = settings?.model || 'gpt-5.4'
 
-        // Call Puter AI with simple format
+        // Call Puter AI with vision support
         await callPuterAI(
           text,
           history,
@@ -168,10 +228,19 @@ export default function App() {
                   : m
               )
             }))
-          }
+          },
+          meta?.imageDataUrls
         )
 
         updateMessage(assistantId, { isStreaming: false })
+
+        // Puter runs in frontend — save both messages to DB manually
+        const finalAssistantContent = useChatStore.getState().messages.find(m => m.id === assistantId)?.content || ''
+        ;(window as any).jarvis?.saveAttachments?.({
+          sessionId: useChatStore.getState().currentSessionId,
+          content: finalAssistantContent,
+          isAssistant: true,
+        })
       } else {
         // Use backend providers (DeepSeek, Groq, Claude, Gemini)
         const history = getHistory().slice(0, -1)
@@ -196,11 +265,50 @@ export default function App() {
       setActiveTool(null)
       setCurrentAssistantId(null)
     }
-  }, [isLoading, addMessage, updateMessage, setLoading, setActiveTool, getHistory, appendChunk])
+  }, [addMessage, updateMessage, setLoading, setActiveTool, getHistory, appendChunk, setShouldStop])
+
+  // The public sendMessage: either processes immediately or blocks
+  const sendMessage = useCallback(async (text: string, meta?: { displayContent?: string; imageDataUrls?: Array<{ name: string; dataUrl: string }>; fileAttachments?: Array<{ name: string; path: string; text?: string }> }) => {
+    if (useChatStore.getState().isLoading) return
+    await processMessage(text, meta)
+  }, [processMessage])
 
   const handleNewChat = () => {
     createNewSession()
   }
+
+  // Regenerate: delete the assistant message, find the preceding user message, resend it
+  const handleRegenerate = useCallback((assistantMsgId: string) => {
+    if (isLoading) return
+    const msgs = getCurrentMessages()
+    const idx = msgs.findIndex(m => m.id === assistantMsgId)
+    if (idx === -1) return
+
+    // Find the preceding user message
+    let userMsg: string | null = null
+    for (let i = idx - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        userMsg = msgs[i].content
+        break
+      }
+    }
+    if (!userMsg) return
+
+    // Delete the assistant message (and anything after it)
+    deleteMessagesFrom(assistantMsgId)
+
+    // Resend
+    setTimeout(() => sendMessage(userMsg!), 50)
+  }, [isLoading, getCurrentMessages, deleteMessagesFrom, sendMessage])
+
+  // Edit & Resend: put the message content into the input bar for editing
+  const handleEditAndResend = useCallback((userMsgId: string, newText: string) => {
+    if (isLoading) return
+    // Delete from this message onward
+    deleteMessagesFrom(userMsgId)
+    // Put text into input bar
+    setEditingText(newText)
+  }, [isLoading, deleteMessagesFrom])
 
   const handleStop = () => {
     console.log('🛑 Stop button clicked')
@@ -227,7 +335,7 @@ export default function App() {
         sidebarOpen={sidebarOpen}
       />
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden">
         <Sidebar
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
@@ -255,13 +363,19 @@ export default function App() {
             </button>
           </div>
 
-          <ChatWindow />
+          <ChatWindow
+            onRegenerate={handleRegenerate}
+            onEditAndResend={handleEditAndResend}
+            onImageClick={(src, name) => setPreviewImage({ src, name })}
+          />
 
           <InputBar
             onSend={sendMessage}
             disabled={isLoading}
             activeTool={activeTool}
             onStop={handleStop}
+            editingText={editingText}
+            onEditingTextConsumed={() => setEditingText('')}
           />
         </div>
       </div>
@@ -278,6 +392,14 @@ export default function App() {
       />
 
       <WakeWordListener />
+      <RevertBar />
+      {previewImage && (
+        <ImagePreview
+          src={previewImage.src}
+          name={previewImage.name}
+          onClose={() => setPreviewImage(null)}
+        />
+      )}
     </div>
   )
 }

@@ -1,10 +1,38 @@
-import React, { useState, useRef, useEffect, KeyboardEvent } from 'react'
+import React, { useState, useRef, useEffect, KeyboardEvent, ClipboardEvent } from 'react'
+import { ModelSelector } from './ModelSelector'
+import { ImagePreview } from './ImagePreview'
+
+// Debug marker so we can verify the running renderer is the new code.
+console.log('[InputBar] module loaded — build tag: attachments-v2')
 
 interface InputBarProps {
-  onSend: (msg: string) => void
+  onSend: (msg: string, meta?: { displayContent?: string; imageDataUrls?: Array<{ name: string; dataUrl: string }>; fileAttachments?: Array<{ name: string; path: string; text?: string }> }) => void
   disabled: boolean
   activeTool: string | null
   onStop?: () => void
+  editingText?: string
+  onEditingTextConsumed?: () => void
+}
+
+type AttachmentKind = 'image' | 'file' | 'pasted-text'
+type AttachmentStatus = 'loading' | 'ready' | 'error'
+
+interface Attachment {
+  id: string
+  name: string
+  size: number
+  kind: AttachmentKind
+  status: AttachmentStatus
+  // Image data URL (only for kind === 'image' once loaded)
+  preview?: string
+  // For pasted-text attachments and small readable text files
+  text?: string
+  // Full file system path (Electron gives this on File objects)
+  path?: string
+  // Original File reference (undefined for pasted-text)
+  file?: File
+  // Error message when status === 'error'
+  error?: string
 }
 
 const SUGGESTIONS = [
@@ -15,12 +43,43 @@ const SUGGESTIONS = [
   'Explain quantum computing',
 ]
 
-export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps) {
+// Anything pasted longer than this becomes a "PASTED" attachment card
+// instead of being inserted into the textarea.
+const PASTE_AS_FILE_THRESHOLD = 500
+
+const uid = () => `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+const isImageFile = (file: File) => file.type.startsWith('image/')
+
+const readFileAsDataURL = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
+
+const readFileAsText = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'))
+    reader.readAsText(file)
+  })
+
+const humanSize = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function InputBar({ onSend, disabled, activeTool, onStop, editingText, onEditingTextConsumed }: InputBarProps) {
   const [value, setValue] = useState('')
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const [attachedFiles, setAttachedFiles] = useState<File[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
@@ -38,46 +97,184 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
     if (!disabled) textareaRef.current?.focus()
   }, [disabled])
 
-  const handleSend = async () => {
-    const msg = value.trim()
-    // Prevent sending if disabled OR if no content
-    if (disabled || (!msg && attachedFiles.length === 0)) return
-    
-    // Handle attached files
-    if (attachedFiles.length > 0) {
-      let fullMessage = msg || "Can you read this file?"
-      
-      for (const file of attachedFiles) {
+  // When editingText is provided, populate the textarea
+  useEffect(() => {
+    if (editingText) {
+      setValue(editingText)
+      onEditingTextConsumed?.()
+      setTimeout(() => textareaRef.current?.focus(), 50)
+    }
+  }, [editingText, onEditingTextConsumed])
+
+  const patchAttachment = (id: string, patch: Partial<Attachment>) => {
+    setAttachments(prev => prev.map(a => (a.id === id ? { ...a, ...patch } : a)))
+  }
+
+  const ingestFiles = async (files: File[]) => {
+    if (files.length === 0) return
+
+    // Seed each file as a loading attachment so the UI shows spinners immediately.
+    const seeded: Attachment[] = files.map(file => ({
+      id: uid(),
+      name: file.name,
+      size: file.size,
+      kind: isImageFile(file) ? 'image' : 'file',
+      status: 'loading',
+      path: (file as any).path || undefined,
+      file,
+    }))
+    setAttachments(prev => [...prev, ...seeded])
+
+    // Load previews / read small text files in parallel.
+    await Promise.all(
+      seeded.map(async att => {
         try {
-          // In Electron, File objects have a 'path' property with the full file path
-          const filePath = (file as any).path
-          
-          if (filePath) {
-            // We have the full path - tell JARVIS to read it
-            fullMessage += `\n\n📎 Attached file: ${file.name}\nPath: ${filePath}\n\nPlease read and analyze this file using the read_file tool.`
-          } else {
-            // Fallback: try to read the file content directly
-            const ext = file.name.split('.').pop()?.toLowerCase()
-            
-            if (['txt', 'md', 'json', 'csv', 'js', 'ts', 'py', 'html', 'css'].includes(ext || '')) {
-              const text = await file.text()
-              fullMessage += `\n\n📎 **File: ${file.name}**\n\`\`\`\n${text.substring(0, 5000)}${text.length > 5000 ? '\n... (truncated)' : ''}\n\`\`\``
+          if (att.kind === 'image' && att.file) {
+            const dataUrl = await readFileAsDataURL(att.file)
+            patchAttachment(att.id, { status: 'ready', preview: dataUrl })
+          } else if (att.file) {
+            // Universal approach: try to read ANY file as text if it's small enough.
+            // Only fall back to a plain chip if it's clearly binary.
+            const smallEnough = att.size <= 500 * 1024 // 500 KB
+
+            if (smallEnough) {
+              try {
+                const text = await readFileAsText(att.file)
+                // Check if binary: if >1% null bytes, treat as binary
+                const nullCount = (text.match(/\0/g) || []).length
+                if (nullCount < text.length * 0.01 && text.length > 0) {
+                  patchAttachment(att.id, { status: 'ready', text })
+                } else {
+                  patchAttachment(att.id, { status: 'ready' })
+                }
+              } catch {
+                patchAttachment(att.id, { status: 'ready' })
+              }
             } else {
-              fullMessage += `\n\n📎 **File: ${file.name}** (${(file.size / 1024).toFixed(1)} KB) - Please use read_file tool to read this file.`
+              patchAttachment(att.id, { status: 'ready' })
             }
+          } else {
+            patchAttachment(att.id, { status: 'ready' })
           }
-        } catch (err) {
-          console.error('Error processing file:', err)
-          fullMessage += `\n\n📎 **File: ${file.name}** - Error: ${err}`
+        } catch (err: any) {
+          patchAttachment(att.id, { status: 'error', error: err?.message || 'Failed to read' })
+        }
+      })
+    )
+  }
+
+  const addPastedText = (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    const lineCount = trimmed.split(/\r?\n/).length
+    const preview = trimmed.split(/\r?\n/).slice(0, 6).join('\n')
+
+    const att: Attachment = {
+      id: uid(),
+      name: `Pasted-${new Date().toISOString().slice(11, 19)}.txt`,
+      size: new Blob([text]).size,
+      kind: 'pasted-text',
+      status: 'loading',
+      text,
+      preview,
+    }
+    setAttachments(prev => [...prev, att])
+
+    // Short synthetic "processing" delay so the loader is actually visible
+    // for tiny pastes — matches the feel of Claude/ChatGPT.
+    window.setTimeout(() => {
+      patchAttachment(att.id, { status: 'ready' })
+    }, 350)
+
+    // Also mention line count in name for easier scanning
+    patchAttachment(att.id, { name: `Pasted ${lineCount} line${lineCount > 1 ? 's' : ''}.txt` })
+  }
+
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const clip = e.clipboardData
+    if (!clip) return
+
+    // Check for pasted images from clipboard
+    const imageItems = Array.from(clip.items || []).filter(
+      item => item.kind === 'file' && item.type.startsWith('image/')
+    )
+
+    if (imageItems.length > 0) {
+      e.preventDefault()
+      const files = imageItems.map(item => item.getAsFile()).filter(Boolean) as File[]
+      ingestFiles(files)
+      return
+    }
+
+    const pastedText = clip.getData('text')
+    if (pastedText && pastedText.length > PASTE_AS_FILE_THRESHOLD) {
+      e.preventDefault()
+      addPastedText(pastedText)
+    }
+    // Otherwise let the browser handle the paste normally.
+  }
+
+  const buildOutgoingMessage = (userText: string): string => {
+    if (attachments.length === 0) return userText
+
+    let out = userText || 'Please look at the attached content.'
+    for (const att of attachments) {
+      if (att.kind === 'pasted-text') {
+        out += `\n\n📎 **${att.name}** (pasted content)\n\`\`\`\n${att.text?.substring(0, 20000) || ''}${(att.text?.length || 0) > 20000 ? '\n... (truncated)' : ''}\n\`\`\``
+      } else if (att.kind === 'image') {
+        if (att.path) {
+          out += `\n\n🖼️ Attached image: ${att.name}\nPath: ${att.path}\nPlease read/analyze this image using the read_file tool.`
+        } else {
+          out += `\n\n🖼️ Attached image: ${att.name} (${humanSize(att.size)}) — no local path available.`
+        }
+      } else {
+        // file
+        if (att.path) {
+          out += `\n\n📎 Attached file: ${att.name}\nPath: ${att.path}\n\nPlease read and analyze this file using the read_file tool.`
+        } else if (att.text) {
+          out += `\n\n📎 **File: ${att.name}**\n\`\`\`\n${att.text.substring(0, 5000)}${att.text.length > 5000 ? '\n... (truncated)' : ''}\n\`\`\``
+        } else {
+          out += `\n\n📎 **File: ${att.name}** (${humanSize(att.size)}) — please use read_file to read this file.`
         }
       }
-      
-      onSend(fullMessage)
-      setAttachedFiles([])
-    } else {
-      onSend(msg)
     }
-    
+    return out
+  }
+
+  const handleSend = () => {
+    const msg = value.trim()
+    if (disabled) return
+    if (!msg && attachments.length === 0) return
+
+    // Block send if any attachment is still loading — user should see the loader finish first
+    if (attachments.some(a => a.status === 'loading')) return
+
+    // Build the full message for the AI (includes paths, instructions)
+    const outgoing = buildOutgoingMessage(msg)
+
+    // The display content is just what the user typed (no path garbage)
+    const displayContent = msg || (attachments.length > 0 ? '' : undefined)
+
+    // Collect image data URLs for inline rendering in chat
+    const imageDataUrls = attachments
+      .filter(a => a.kind === 'image' && a.preview)
+      .map(a => ({ name: a.name, dataUrl: a.preview! }))
+
+    // Collect file attachments for preview cards in chat
+    const fileAttachments = attachments
+      .filter(a => a.kind === 'file' || a.kind === 'pasted-text')
+      .map(a => ({ name: a.name, path: a.path || '', text: a.text?.slice(0, 500) || undefined }))
+
+    onSend(outgoing, {
+      displayContent,
+      imageDataUrls: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+      fileAttachments: fileAttachments.length > 0 ? fileAttachments : undefined,
+    })
+
+    console.log('[InputBar] SEND — imageDataUrls:', imageDataUrls.length, 'files:', fileAttachments.length, 'display:', displayContent?.slice(0, 50))
+
+    setAttachments([])
     setValue('')
     setShowSuggestions(false)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -85,13 +282,13 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-    setAttachedFiles(prev => [...prev, ...files])
-    // Reset input so same file can be selected again
+    console.log('[InputBar] files selected:', files.length, files.map(f => f.name))
+    ingestFiles(files)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const removeFile = (index: number) => {
-    setAttachedFiles(prev => prev.filter((_, i) => i !== index))
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id))
   }
 
   const openFilePicker = () => {
@@ -101,22 +298,17 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      // Only send if not disabled
-      if (!disabled) {
-        handleSend()
-      }
+      if (!disabled) handleSend()
     }
   }
 
   const toggleVoice = async () => {
     if (isRecording) {
-      // Stop recording
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop()
       }
       setIsRecording(false)
     } else {
-      // Start recording
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         streamRef.current = stream
@@ -126,19 +318,15 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
         audioChunksRef.current = []
 
         mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunksRef.current.push(event.data)
-          }
+          if (event.data.size > 0) audioChunksRef.current.push(event.data)
         }
 
         mediaRecorder.onstop = async () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType })
-
           const reader = new FileReader()
           reader.readAsDataURL(audioBlob)
           reader.onloadend = async () => {
             const base64Audio = (reader.result as string).split(',')[1]
-
             setIsTranscribing(true)
             try {
               const result = await (window as any).jarvis.transcribe(base64Audio, mediaRecorder.mimeType)
@@ -180,6 +368,7 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
   }
 
   const toolLabel = activeTool?.replace(/_/g, ' ') || ''
+  const anyLoading = attachments.some(a => a.status === 'loading')
 
   return (
     <div className="border-t border-jarvis-border bg-jarvis-panel px-4 py-3">
@@ -209,37 +398,25 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
         </div>
       )}
 
-      {/* Attached files display */}
-      {attachedFiles.length > 0 && (
+      {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
-          {attachedFiles.map((file, i) => (
-            <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded bg-jarvis-accent/10 border border-jarvis-accent/30 text-xs">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-jarvis-accent">
-                <path d="M9 2H4C3.44772 2 3 2.44772 3 3V13C3 13.5523 3.44772 14 4 14H12C12.5523 14 13 13.5523 13 13V6L9 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M9 2V6H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              <span className="text-jarvis-text">{file.name}</span>
-              <span className="text-jarvis-muted">({(file.size / 1024).toFixed(1)} KB)</span>
-              <button
-                onClick={() => removeFile(i)}
-                className="ml-1 text-jarvis-muted hover:text-red-400 transition-colors"
-                title="Remove file"
-              >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                  <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-              </button>
-            </div>
+          {attachments.map(att => (
+            <AttachmentChip
+              key={att.id}
+              attachment={att}
+              onRemove={() => removeAttachment(att.id)}
+              onImageClick={(src, name) => setPreviewImage({ src, name })}
+            />
           ))}
         </div>
       )}
 
       {/* Hidden file input */}
+      {/* Accept ALL file types — user should be able to attach anything */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,.pdf,.doc,.docx,.txt,.json,.csv,.xlsx,.md,.js,.ts,.py,.html,.css"
         onChange={handleFileSelect}
         className="hidden"
       />
@@ -268,13 +445,18 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
           </svg>
         </button>
 
+        <div className="flex-shrink-0 mb-0.5">
+          <ModelSelector />
+        </div>
+
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
             value={value}
             onChange={e => setValue(e.target.value)}
             onKeyDown={handleKey}
-            placeholder={isTranscribing ? 'Transcribing audio...' : disabled ? 'JARVIS is thinking… (you can type, but wait to send)' : 'Ask anything… (Enter to send, Shift+Enter for newline)'}
+            onPaste={handlePaste}
+            placeholder={isTranscribing ? 'Transcribing audio...' : disabled ? 'JARVIS is thinking…' : 'Ask anything… (Enter to send, Shift+Enter for newline)'}
             disabled={isTranscribing}
             rows={1}
             className="w-full bg-jarvis-bg border border-jarvis-border rounded px-4 py-2.5 text-jarvis-text text-sm
@@ -309,11 +491,11 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
 
         <button
           onClick={handleSend}
-          disabled={!value.trim() || disabled}
+          disabled={disabled || anyLoading || (!value.trim() && attachments.length === 0)}
           className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded border border-jarvis-accent/40
                      text-jarvis-accent hover:bg-jarvis-accent/10 disabled:opacity-30 disabled:cursor-not-allowed
                      transition-all hover:shadow-glow-sm mb-0.5"
-          title={disabled ? "Wait for JARVIS to finish" : "Send (Enter)"}
+          title={disabled ? 'Wait for JARVIS to finish' : anyLoading ? 'Attachments still loading…' : 'Send (Enter)'}
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path d="M2 8h12M9 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -336,16 +518,173 @@ export function InputBar({ onSend, disabled, activeTool, onStop }: InputBarProps
 
       <div className="flex justify-between items-center mt-1.5 px-1">
         <span className="text-jarvis-muted text-xs">
-          {attachedFiles.length > 0 
-            ? `${attachedFiles.length} file${attachedFiles.length > 1 ? 's' : ''} attached • ${value.length} chars`
-            : value.length > 0 
-              ? `${value.length} chars` 
+          {attachments.length > 0
+            ? `${attachments.length} attachment${attachments.length > 1 ? 's' : ''} • ${value.length} chars${anyLoading ? ' • loading…' : ''}`
+            : value.length > 0
+              ? `${value.length} chars`
               : 'Ctrl+Shift+J to toggle window'}
         </span>
-        <span className="text-jarvis-muted text-xs">
-          Powered by AI
-        </span>
+        <span className="text-jarvis-muted text-xs">Powered by AI</span>
       </div>
+
+      {/* Image lightbox preview */}
+      {previewImage && (
+        <ImagePreview
+          src={previewImage.src}
+          name={previewImage.name}
+          onClose={() => setPreviewImage(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---------- attachment chip ---------------------------------------------------
+
+interface AttachmentChipProps {
+  attachment: Attachment
+  onRemove: () => void
+  onImageClick?: (src: string, name: string) => void
+}
+
+function AttachmentChip({ attachment: att, onRemove, onImageClick }: AttachmentChipProps) {
+  const loading = att.status === 'loading'
+  const errored = att.status === 'error'
+
+  // Image thumbnail chip
+  if (att.kind === 'image') {
+    return (
+      <div
+        className="relative rounded-lg overflow-hidden border border-jarvis-border bg-jarvis-bg group cursor-pointer hover:border-jarvis-accent/50 transition-colors"
+        style={{ width: '140px' }}
+        title={`${att.name} (${humanSize(att.size)}) — click to preview`}
+        onClick={() => att.preview && onImageClick?.(att.preview, att.name)}
+      >
+        {att.preview ? (
+          <img src={att.preview} alt={att.name} className="w-full h-20 object-cover" />
+        ) : (
+          <div className="w-full h-20 flex items-center justify-center text-jarvis-muted bg-jarvis-panel">
+            <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <circle cx="6" cy="7" r="1.2" stroke="currentColor" strokeWidth="1.2"/>
+              <path d="M14 10l-3-3-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </div>
+        )}
+
+        {/* Filename bar at bottom */}
+        <div className="px-2 py-1.5 bg-jarvis-panel border-t border-jarvis-border">
+          <p className="text-[10px] text-jarvis-text truncate">{att.name}</p>
+        </div>
+
+        {loading && <LoaderOverlay />}
+        {errored && <ErrorOverlay title={att.error || 'Failed to read image'} />}
+
+        <button
+          onClick={e => { e.stopPropagation(); onRemove() }}
+          className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-jarvis-bg/90 border border-jarvis-border
+                     text-jarvis-muted hover:text-red-400 hover:border-red-400/60 flex items-center justify-center
+                     opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Remove"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  // Pasted-text card OR text-file with content read into memory: Claude-style preview card.
+  if (att.kind === 'pasted-text' || (att.kind === 'file' && att.text)) {
+    const isPasted = att.kind === 'pasted-text'
+    const previewText =
+      att.preview ||
+      att.text?.split(/\r?\n/).slice(0, 6).join('\n') ||
+      att.text?.slice(0, 200) ||
+      ''
+    const label = isPasted ? 'PASTED' : (att.name.split('.').pop()?.toUpperCase() || 'TEXT')
+    return (
+      <div
+        className="relative w-40 rounded border border-jarvis-border bg-jarvis-bg overflow-hidden group"
+        title={att.name}
+      >
+        <div className="px-2 py-1.5 h-16 overflow-hidden text-[10px] leading-snug text-jarvis-muted whitespace-pre-wrap font-mono">
+          {previewText}
+        </div>
+        <div className="px-2 py-1 border-t border-jarvis-border flex items-center justify-between bg-jarvis-panel gap-2">
+          <span className="text-[9px] font-display tracking-wider text-jarvis-accent shrink-0">{label}</span>
+          <span className="text-[9px] text-jarvis-muted truncate flex-1 text-right" title={att.name}>
+            {isPasted ? humanSize(att.size) : att.name}
+          </span>
+        </div>
+
+        {loading && <LoaderOverlay />}
+
+        <button
+          onClick={onRemove}
+          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-jarvis-panel border border-jarvis-border
+                     text-jarvis-muted hover:text-red-400 hover:border-red-400/60 flex items-center justify-center
+                     opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Remove"
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+            <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  // Regular file chip (with spinner while loading)
+  return (
+    <div
+      className="relative flex items-center gap-2 px-3 py-1.5 rounded bg-jarvis-accent/10 border border-jarvis-accent/30 text-xs group"
+      title={`${att.name} (${humanSize(att.size)})`}
+    >
+      {loading ? (
+        <div className="w-3 h-3 border-2 border-jarvis-accent border-t-transparent rounded-full animate-spin" />
+      ) : errored ? (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-red-400">
+          <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M8 5v4M8 11h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-jarvis-accent">
+          <path d="M9 2H4C3.44772 2 3 2.44772 3 3V13C3 13.5523 3.44772 14 4 14H12C12.5523 14 13 13.5523 13 13V6L9 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M9 2V6H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+      <span className="text-jarvis-text max-w-[180px] truncate">{att.name}</span>
+      <span className="text-jarvis-muted">({humanSize(att.size)})</span>
+      <button
+        onClick={onRemove}
+        className="ml-1 text-jarvis-muted hover:text-red-400 transition-colors"
+        title="Remove file"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+function LoaderOverlay() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-jarvis-bg/70 backdrop-blur-[1px]">
+      <div className="w-5 h-5 border-2 border-jarvis-accent border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
+
+function ErrorOverlay({ title }: { title: string }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-red-900/40" title={title}>
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="none" className="text-red-300">
+        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M8 5v4M8 11h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
     </div>
   )
 }

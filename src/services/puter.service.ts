@@ -16,65 +16,110 @@ export async function callPuterAI(
   systemPrompt: string,
   model: string,
   onChunk: (text: string) => void,
-  onToolCall: (toolName: string, args: any) => void
+  onToolCall: (toolName: string, args: any) => void,
+  imageDataUrls?: Array<{ name: string; dataUrl: string }>
 ): Promise<string> {
   const puter = await getPuter()
-  
+
+  // Set auth token if available
+  const settings = await (window as any).jarvis?.getSettings()
+  const puterToken = settings?.puterToken || ''
+  if (puterToken && puter.authToken !== puterToken) {
+    puter.authToken = puterToken
+  }
+
   let fullResponse = ''
 
   try {
     console.log(`🤖 Calling Puter.js with model: ${model}`)
 
-    // Build context from history
-    let contextPrompt = systemPrompt + '\n\n'
-    if (history.length > 0) {
-      contextPrompt += 'Previous conversation:\n'
-      history.forEach(msg => {
-        contextPrompt += `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}\n`
-      })
-      contextPrompt += '\n'
-    }
-    contextPrompt += `User: ${userMessage}\nAssistant:`
+    // Build messages array (OpenAI format)
+    const messages: any[] = [
+      { role: 'system', content: systemPrompt },
+    ]
 
-    // Call Puter AI (simple format - just string prompt)
-    const response = await puter.ai.chat(contextPrompt, {
-      model: model.includes('/') ? model : `openai/${model}`,
+    // Add history
+    for (const msg of history) {
+      messages.push({ role: msg.role, content: msg.content })
+    }
+
+    // Build user message — with vision support if images are attached
+    if (imageDataUrls && imageDataUrls.length > 0) {
+      // Multi-modal message with images
+      const content: any[] = []
+
+      // Add images first
+      for (const img of imageDataUrls) {
+        content.push({
+          type: 'image_url',
+          image_url: { url: img.dataUrl },
+        })
+      }
+
+      // Add text
+      content.push({ type: 'text', text: userMessage })
+
+      messages.push({ role: 'user', content })
+    } else {
+      messages.push({ role: 'user', content: userMessage })
+    }
+
+    // Determine model string for Puter
+    const modelStr = model.includes('/') ? model : undefined
+
+    // Call Puter AI with messages array
+    const response = await puter.ai.chat(messages, {
+      model: modelStr || model,
     })
 
     console.log('📦 Puter response:', response)
 
-    // Check if response is valid
-    if (!response || !response.message || !response.message.content) {
+    // Handle different response formats
+    let content = ''
+
+    if (typeof response === 'string') {
+      content = response
+    } else if (response?.message?.content) {
+      content = response.message.content
+    } else if (response?.content) {
+      content = response.content
+    } else if (response?.choices?.[0]?.message?.content) {
+      content = response.choices[0].message.content
+    } else if (response?.text) {
+      content = response.text
+    } else if (typeof response?.toString === 'function' && response.toString() !== '[object Object]') {
+      content = response.toString()
+    }
+
+    if (!content) {
+      console.error('❌ Puter response structure:', JSON.stringify(response, null, 2))
       throw new Error('Invalid response from Puter.js - no content returned')
     }
 
-    // Get the response content
-    const content = response.message.content
     fullResponse = content
     onChunk(content)
 
     return fullResponse
   } catch (err: any) {
     console.error('❌ Puter error:', err)
-    
+
     if (err.message?.includes('auth') || err.message?.includes('sign in') || err.message?.includes('login')) {
       throw new Error('Please sign in to Puter to use AI features. A login window should appear.')
     }
-    
+
     throw new Error(err.message || 'Unknown error from Puter.js')
   }
 }
 
 export function buildSystemPrompt(customPrompt: string = ''): string {
   const today = new Date()
-  const dateStr = today.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
+  const dateStr = today.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
   })
 
-  // Get user name from localStorage or default
   const userName = localStorage.getItem('userName') || 'Jatin'
 
   return `You are JARVIS — an advanced AI desktop assistant. You are intelligent, efficient, and proactive.
@@ -84,20 +129,9 @@ export function buildSystemPrompt(customPrompt: string = ''): string {
 
 **IMPORTANT: The user's name is ${userName}. Address them by name when appropriate.**
 ${customPrompt ? `\n[Additional Instructions]\n${customPrompt}\n` : ''}
-You have access to powerful tools:
-- web_search: Search the internet for current information
-- execute_code: Run JavaScript code and return results
-- read_file: Read any file from the user's computer
-- write_file: Write or create files on the user's computer
-
 Guidelines:
-- Be concise but thorough. Don't pad responses.
-- **IMPORTANT: For sports/events, search without the year (e.g., "IPL match tomorrow" not "IPL match May 2026").**
-- **IMPORTANT: When you get search results, extract ALL details: teams, time, venue, TV channel.**
-- Don't just say "check this website" - give the actual answer from the search results.
-- When you use a tool, briefly mention what you're doing.
-- **IMPORTANT: When writing code, ALWAYS show the code in your response using markdown code blocks.**
+- Be concise but thorough.
 - Format responses in markdown when helpful.
-- Chain tools intelligently to complete complex tasks.
-- **After using tools, always provide a clear, direct answer with ALL available details.**`
+- When writing code, ALWAYS show the code in your response using markdown code blocks.
+- Give direct answers, don't just link to websites.`
 }

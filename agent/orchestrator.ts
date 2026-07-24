@@ -2,7 +2,6 @@ import { getGeminiClient, buildSystemPrompt } from './gemini.client'
 import { geminiTools } from './tools/registry'
 import { dispatchTool } from './tools/dispatcher'
 import { getRecentContext, saveMessage } from '../db/sqlite'
-import { speak } from './tools/voice'
 import store from './store'
 
 async function retryWithBackoff<T>(
@@ -362,14 +361,8 @@ export async function runAgent(
     console.error('Failed to save messages:', e)
   }
 
-  try {
-    const isError = finalText.includes('⚠️ Error:')
-    if (finalText.trim() && !isError) {
-      await speak(finalText)
-    }
-  } catch (e) {
-    console.error('Failed to speak assistant response:', e)
-  }
+  // TTS is centralized in the agent IPC handler now so every provider
+  // (Gemini, Ollama, DeepSeek, Claude, Groq, MiniMax) speaks consistently.
 
   return finalText
 }
