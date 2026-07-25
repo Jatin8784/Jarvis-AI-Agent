@@ -8,7 +8,7 @@ import { runAgentPuter } from '../../agent/puter.orchestrator'
 import { runAgentMiniMax } from '../../agent/minimax.orchestrator'
 import { transcribeAudio, detectWakeWord } from '../../agent/transcriber'
 import { speak } from '../../agent/tools/voice'
-import { getMessages, saveMessage, createSession, getSessions, updateSession, saveMessageAttachments, getMessageAttachments, updateMessageDisplayContent, clearAllData, deleteSessionData } from '../../db/sqlite'
+import { getMessages, saveMessage, createSession, getSessions, updateSession, saveMessageAttachments, getMessageAttachments, updateMessageDisplayContent, clearAllData, deleteSessionData, getMessagesBySessionIds } from '../../db/sqlite'
 import Store from 'electron-store'
 
 const store = new Store()
@@ -154,7 +154,20 @@ export function registerAgentIPC(win: BrowserWindow | null) {
   })
 
   ipcMain.handle('db:history', async (event, limit = 50, userId?: string) => {
-    const messages = getMessages(limit, undefined, userId) as any[]
+    let messages: any[]
+
+    if (userId) {
+      // Get sessions for this user, then load messages for those sessions
+      const sessions = getSessions(100, userId) as any[]
+      if (sessions.length === 0) return []
+
+      const sessionIds = sessions.map((s: any) => s.id)
+      const placeholders = sessionIds.map(() => '?').join(',')
+      messages = getMessagesBySessionIds(sessionIds, limit)
+    } else {
+      messages = getMessages(limit) as any[]
+    }
+
     if (messages.length === 0) return messages
 
     // Load attachments for all messages

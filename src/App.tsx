@@ -76,8 +76,11 @@ function MainApp() {
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
 
   useEffect(() => {
-    initialize()
-  }, [initialize])
+    if (user?.uid) {
+      ;(window as any).__jarvisUserId = user.uid
+      initialize()
+    }
+  }, [initialize, user])
 
   useEffect(() => {
     const removeChunk = (window as any).jarvis?.onChunk?.((chunk: string) => {

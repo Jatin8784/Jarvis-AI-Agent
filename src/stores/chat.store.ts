@@ -70,9 +70,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   initialize: async () => {
     try {
-      // Get current user ID from auth store
-      const { useAuthStore } = await import('./auth.store')
-      const userId = useAuthStore.getState().user?.uid || ''
+      // Get current user ID
+      const userId = (window as any).__jarvisUserId || ''
 
       const sessions = await (window as any).jarvis?.getSessions(userId)
       if (sessions && sessions.length > 0) {

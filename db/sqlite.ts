@@ -229,6 +229,17 @@ export function getRecentContext(limit = 10): Array<{role: string, content: stri
   return rows.reverse()
 }
 
+export function getMessagesBySessionIds(sessionIds: string[], limit = 500): any[] {
+  if (sessionIds.length === 0) return []
+  const placeholders = sessionIds.map(() => '?').join(',')
+  return db.prepare(`
+    SELECT * FROM messages
+    WHERE session_id IN (${placeholders})
+    ORDER BY timestamp ASC
+    LIMIT ?
+  `).all(...sessionIds, limit) as any[]
+}
+
 export function createSession(id: string, title: string, userId?: string) {
   const now = Date.now()
   db.prepare(`
